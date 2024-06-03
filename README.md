@@ -2,4 +2,4 @@
 
 ##Architecture
 
-![Alt text](images/example.png)
+![Alt text](images/IMG_1286.jpg)
