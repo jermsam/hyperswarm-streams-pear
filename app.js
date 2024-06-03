@@ -2,7 +2,6 @@ import crypto from 'hypercore-crypto'; // Cryptographic functions for generating
 import b4a from 'b4a';                 // Module for buffer-to-string and vice-versa conversions
 import { swarm } from './network.js';
 import { decodeChunk, encodeChunk } from './video.js';
-import {store} from './store.js';
 import {createObservableMap} from './utils.js';
 
 let cameraOn = false;
@@ -10,7 +9,7 @@ let localVideoTrack;
 let remoteUsers = createObservableMap();
 
 // When there's a new connection, listen for new video streams, and add them to the UI
-swarm.on('connection', (socket, peerInfo) => {
+swarm.on('connection', (socket) => {
   const strKey = b4a.toString(socket.remotePublicKey, 'hex').substring(0, 6)
   // Check if stream exists for this peer
   if (!remoteUsers.has(strKey)) {
@@ -52,8 +51,8 @@ async function joinSwarm(topicBuffer) {
   document.querySelector('#setup').classList.add('hidden');
   document.querySelector('#loading').classList.remove('hidden');
   swarm.join(topicBuffer);
-  const topic = b4a.toString(topicBuffer, 'hex');
-  document.querySelector('#chat-room-topic').innerText = topic;
+
+  document.querySelector('#chat-room-topic').innerText = b4a.toString(topicBuffer, 'hex');
   document.querySelector('#loading').classList.add('hidden');
   document.querySelector('#chat').classList.remove('hidden');
 }
@@ -85,6 +84,7 @@ async function leaveChatRoom(e) {
   e?.preventDefault();
   const topicStr = document.querySelector('#join-chat-room-topic').value;
   const topicBuffer = b4a.from(topicStr, 'hex');
+  localVideoTrack.enabled = false;
   await leaveSwarm(topicBuffer);
 }
 
@@ -130,7 +130,7 @@ async function startLocalStream() {
         framerate: 30
       });
     },
-    async transform(frame, controller) {
+    async transform(frame) {
       if (this.encoder.encodeQueueSize > 2) {
         frame.close();
       } else {
@@ -156,7 +156,7 @@ async function startLocalStream() {
 
       this.decoder.configure({ codec: 'vp8' });
     },
-    async transform(chunk, controller) {
+    async transform(chunk) {
       const decoded = decodeChunk(chunk);
       this.decoder.decode(decoded);
     }
@@ -192,13 +192,13 @@ async function startLocalStream() {
   cameraOn = true;
 }
 
-async function stopLocalStream(e) {
+async function stopLocalStream() {
   if (localVideoTrack) {
     const existingVideo = document.getElementById('local-video')
     existingVideo.pause();
     existingVideo.currentTime = 0; // Reset the video to the beginning
     // Stop all tracks of the MediaStream
-    localVideoTrack.stop()
+    localVideoTrack.enabled = false;
     // Clear the srcObject to fully "stop" the video
     existingVideo.srcObject = null;
     cameraOn = false;
@@ -223,6 +223,7 @@ remoteUsers.onAdd((key, value) => {
 });
 
 remoteUsers.onRemove((key) => {
+  remoteUsers.delete(key)
   console.log(`Item deleted: ${key}`);
   const idToRemove = `user-container-${key}`;
   const elementToRemove = document.getElementById(idToRemove);
