@@ -121,9 +121,17 @@ async function startLocalStream() {
         output: async (chunk) => {
           const encoded = encodeChunk(chunk);
           // Send the message to all peers (that you are connected to)
+          // Send the chunk to all connected peers
           const peers = [...swarm.connections];
-          for await (const peer of peers) {
-            peer.write(encoded);
+          for (const peer of peers) {
+            //  check if the stream is writable before attempting to write to it.
+            if (peer.opened) {
+              try {
+                peer.write(encoded);
+              } catch (error) {
+                console.error('Error writing to peer stream:', error);
+              }
+            }
           }
           controller.enqueue(encoded);
         },
