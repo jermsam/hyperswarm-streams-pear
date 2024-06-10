@@ -9,7 +9,6 @@ let cameraOn = false; // should be shared across peers
 let remoteUsers = createObservableMap();
 let localPublicKey;
 
-
 async function receiveChunksFromPeer(peersNoisePublicKey, chunk) {
   const {writer} = remoteUsers.get(peersNoisePublicKey);
   if (writer) {
