@@ -3,43 +3,54 @@ import b4a from 'b4a';                 // Module for buffer-to-string and vice-v
 import {swarm} from './network.js';
 import {decodeChunk, encodeChunk} from './video.js';
 import {createObservableMap} from './utils.js';
+import {deserialize, serialize} from 'bson';
 
 let cameraOn = false; // should be shared across peers
-let localVideoStream;  // should be shared across peers chunk by chunk
 let remoteUsers = createObservableMap();
+let localPublicKey;
+
+
+async function receiveChunksFromPeer(peersNoisePublicKey, chunk) {
+  const {writer} = remoteUsers.get(peersNoisePublicKey);
+  if (writer) {
+    try {
+      await writer.write(chunk);
+    } catch (e) {
+      console.error('Error writing chunk to the pipeline:', e);
+    }
+  }
+}
 
 // When there's a new connection, listen for new video streams, and add them to the UI
 swarm.on('connection', (socket, peerInfo) => {
-  const strKey = b4a.toString(socket.remotePublicKey, 'hex');
-  console.log(peerInfo);
+  const peersNoisePublicKey = b4a.toString(peerInfo.publicKey, 'hex');
+  console.log({peersNoisePublicKey});
+  localPublicKey = b4a.toString(socket.publicKey, 'hex');
+  console.log({localPublicKey});
   // Check if stream exists for this peer
-  if (!remoteUsers.has(strKey)) {
-    const transformer = new TransformStream({
-      transform: (chunk, controller) => {
-        controller.enqueue(chunk);
-      },
-    });
-    onPeerJoined(strKey, transformer);
-    remoteUsers.set(strKey, transformer);
-  }
+  onPeerJoined(peersNoisePublicKey);
 
   socket.on('data', async (chunk) => {
-    const transformer = remoteUsers.get(strKey);
-    try {
-      const writer = transformer.writable.getWriter();
-      await writer.write(chunk);
-      writer.releaseLock();
-    } catch (error) {
-      console.error('Error getting writer for peer:', strKey, error);
-      // Handle the error (e.g., remove peer or reconnect)
+    const bsonData = deserialize(b4a.toBuffer(chunk));
+    if(bsonData.type === 'camera') {
+      const {id, value} = bsonData;
+
+      if(value === 'off') {
+        onPeerLeft(id)
+        removePeerVideo(id)
+      } else if (value === 'on') {
+        onPeerJoined(id)
+        addPeerVideo(id)
+      }
+    } else {
+      await receiveChunksFromPeer(peersNoisePublicKey, chunk);
     }
   });
 
   socket.once('close', async () => {
-    const transformer = remoteUsers.get(strKey);
-    await closeTransformStream(transformer);
-    onPeerLeft(strKey); // Handle UI update on peer leave
+    onPeerLeft(peersNoisePublicKey);
   });
+
 });
 
 // When there's updates to the swarm, update the peers count
@@ -100,18 +111,37 @@ document.querySelector('#leave-btn').addEventListener('click', leaveChatRoom);
 const cameraButton = document.getElementById('camera-btn');
 const videoStreamsContainer = document.getElementById('video-streams');
 
+function addLocalVideo(stream) {
+  const existingVideoElement = document.getElementById(`video-local`);
+  if (existingVideoElement) {
+    existingVideoElement.srcObject = stream;
+  } else {
+    const video = document.createElement('video');
+    video.id = `video-local`;
+    video.classList.add('video-container');
+    video.style.width = '100%';
+    video.style.height = '100%';
+    video.autoplay = true;
+    video.srcObject = stream;
 
+    const videoContainer = document.createElement('div');
+    videoContainer.classList.add('video-container');
+    videoContainer.id = 'user-container-local';
 
+    videoContainer.appendChild(video);
+    videoStreamsContainer.appendChild(videoContainer);
+  }
+}
 
 async function startLocalStream() {
+
   const stream = await navigator.mediaDevices.getUserMedia({video: true});
   const [videoTrack] = stream.getVideoTracks();
 
   const mediaProcessor = new MediaStreamTrackProcessor({track: videoTrack});
-  const inputStream = mediaProcessor.readable;
 
-  const mediaGenerator = new MediaStreamTrackGenerator({kind: 'video'});
-  const outputStream = mediaGenerator.writable;
+
+  const generator = new MediaStreamTrackGenerator({kind: 'video'});
 
   const encoderTransformStream = new TransformStream({
     start(controller) {
@@ -148,7 +178,6 @@ async function startLocalStream() {
         bitrate: 2_000_000,
         framerate: 30,
       });
-
     },
     async transform(frame) {
       if (this.encoder.encodeQueueSize > 2) {
@@ -161,7 +190,7 @@ async function startLocalStream() {
          * unlike other frames (inter frames) that rely on previous frames for decoding.
          * */
         const insertKeyFrame = this.frameCounter % this.keyFrameInterval === 0;
-        this.encoder.encode(frame, { keyFrame: insertKeyFrame });
+        this.encoder.encode(frame, {keyFrame: insertKeyFrame});
         this.frameCounter++;
         frame.close();
       }
@@ -187,48 +216,57 @@ async function startLocalStream() {
     },
   });
 
-  inputStream
+  mediaProcessor.readable
     .pipeThrough(encoderTransformStream)
     .pipeThrough(decoderTransformStream)
-    .pipeTo(outputStream);
+    .pipeTo(generator.writable);
 
-  const existingVideo = document.getElementById('local-video');
+  const mediaStream = new MediaStream([generator]);
 
-  localVideoStream = new MediaStream();
-  localVideoStream.addTrack(mediaGenerator);
+  addLocalVideo(mediaStream);
 
-  if (existingVideo) {
-    existingVideo.srcObject = new MediaStream([mediaGenerator]);
-  } else {
-    const video = document.createElement('video');
-    video.id = 'local-video';
-    video.classList.add('video-container');
-    video.style.width = '100%';
-    video.style.height = '100%';
-    video.autoplay = true;
-    video.srcObject = new MediaStream([mediaGenerator]);
-
-    const videoContainer = document.createElement('div');
-    videoContainer.classList.add('video-container');
-    videoContainer.id = 'user-container-local';
-
-    videoContainer.appendChild(video);
-    videoStreamsContainer.appendChild(videoContainer);
-  }
-
+ // Get the writer for the processor
+  remoteUsers.set('local', {videoTrack, generator});
   cameraOn = true;
+  const peers = [...swarm.connections];
+  for (const peer of peers) {
+    if (peer.opened) {
+      try {
+        const bsonData = {
+          type: 'camera', id: localPublicKey, value: 'on'
+        };
+        peer.write(b4a.from(serialize(bsonData)));
+      } catch (error) {
+        console.error('Error notifying peer about stopping stream:', error);
+      }
+    }
+  }
 }
 
 async function stopLocalStream() {
-  if (localVideoStream) {
-    const existingVideo = document.getElementById('local-video');
-    existingVideo.pause();
-    existingVideo.currentTime = 0; // Reset the video to the beginning
-    // Stop all tracks of the MediaStream
-    stopMediaTracks(localVideoStream);
-    // Clear the srcObject to fully "stop" the video
-    existingVideo.srcObject = null;
-    cameraOn = false;
+  const existingVideo = document.getElementById(`video-local`);
+  if (remoteUsers.has('local')) {
+    const {videoTrack, generator} = remoteUsers.get('local');
+    videoTrack.stop();
+    generator.stop();
+    remoteUsers.delete('local');
+  }
+  existingVideo.currentTime = 0;
+  existingVideo.srcObject = null;
+  cameraOn = false;
+  // Notify peers that the local stream has stopped
+  const peers = [...swarm.connections];
+  for (const peer of peers) {
+    if (peer.opened) {
+      try {
+        const bsonData = {
+          type: 'camera', id: localPublicKey, value: 'off'
+        };
+        peer.write(b4a.from(serialize(bsonData)));
+      } catch (error) {
+        console.error('Error notifying peer about stopping stream:', error);
+      }
+    }
   }
 }
 
@@ -242,28 +280,22 @@ cameraButton.addEventListener('click', async () => {
   }
 });
 
-
-remoteUsers.onAdd((key, value) => {
-  console.log(`New item added: ${key} => ${value}`);
-  // onPeerJoined(key, value);
+remoteUsers.onAdd((key) => {
+  addPeerVideo(key);
 });
 
 remoteUsers.onRemove((key) => {
-  console.log(`Item deleted: ${key}`);
-  const idToRemove = `user-container-${key}`;
-  const elementToRemove = document.getElementById(idToRemove);
-  elementToRemove.remove();
-  // Get the transform stream for the removed peer
-  // const transformer = remoteUsers.deleted?.[key];
-  // if (transformer) {
-  //   // Reader and writer are closed automatically when the TransformStream is garbage collected
-  // }
+  removePeerVideo(key);
 });
 
+function onPeerJoined(remotePeerPrimaryKey) {
+  if (!remoteUsers.has(remotePeerPrimaryKey)) {
+    const transformer = new TransformStream({
+      transform: (chunk, controller) => {
+        controller.enqueue(chunk);
+      },
+    });
 
-
-function onPeerJoined(key, inputTransform) {
-  if (!remoteUsers.get(key)) {
     const decoderTransformStream = new TransformStream({
       start(controller) {
         this.decoder = new VideoDecoder({
@@ -282,10 +314,10 @@ function onPeerJoined(key, inputTransform) {
            * When a new peer joins, it's important to ensure they receive a key frame to initialize their decoder properly.
            * Decode Key Frames First: Ensure that the key frame is decoded first for new peers.
            * */
-          if(decoded.type === 'key') {
+          if (decoded.type === 'key') {
             await this.decoder.decode(decoded); // Decode the key frame first
             this.started = true;
-          } else if(this.started) {
+          } else if (this.started) {
             await this.decoder.decode(decoded);
           }
 
@@ -298,42 +330,60 @@ function onPeerJoined(key, inputTransform) {
 
       },
     });
-    const remoteInput = inputTransform.readable.pipeThrough(decoderTransformStream);
-    const mediaGenerator = new MediaStreamTrackGenerator({kind: 'video'});
-    const outputStream = mediaGenerator.writable;
-    remoteInput.pipeTo(outputStream);
-
-    const existingVideoElement = document.getElementById(`video-${key}`);
-    if (existingVideoElement) {
-      existingVideoElement.srcObject = new MediaStream([mediaGenerator]);
-    } else {
-      const remoteVideo = document.createElement('video');
-      remoteVideo.id = `video-${key}`;
-      remoteVideo.classList.add('video-container');
-      remoteVideo.style.width = '100%';
-      remoteVideo.style.height = '100%';
-      remoteVideo.autoplay = true;
-
-      remoteVideo.srcObject = new MediaStream([mediaGenerator]);
-
-      const videoContainer = document.createElement('div');
-      videoContainer.classList.add('video-container');
-      videoContainer.id = `user-container-${key}`;
-      videoContainer.appendChild(remoteVideo);
-      videoStreamsContainer.appendChild(videoContainer);
-    }
-
+    const generator = new MediaStreamTrackGenerator({kind: 'video'});
+    const writer = transformer.writable.getWriter();
+    transformer.readable
+      .pipeThrough(decoderTransformStream)
+      .pipeTo(generator.writable);
+    remoteUsers.set(remotePeerPrimaryKey, {transformer, writer, generator});
   }
 }
 
-const stopMediaTracks = stream => {
-  stream.getTracks().forEach(track => {
-    track.stop();
-  });
-};
+function onPeerLeft(remotePeerPrimaryKey) {
+  console.log(`Peer left: ${remotePeerPrimaryKey}`);
+  if (remoteUsers.has(remotePeerPrimaryKey)) {
+    const { transformer, writer, generator} = remoteUsers.get(remotePeerPrimaryKey);
 
-function onPeerLeft(key) {
-  console.log(`Peer left: ${key}`);
+    // Stop the MediaStreamTrackGenerator
+    generator.stop();
+
+    // Properly close the streams and clean up
+    writer.close().catch((error) => console.error('Error closing writer stream:', error));
+
+    if(!transformer.locked) {
+      // Properly close the streams and clean up
+      transformer.readable.cancel().catch((error) => console.error('Error canceling readable stream:', error));
+    }
+
+    remoteUsers.delete(remotePeerPrimaryKey);
+  }
+}
+
+function addPeerVideo(remotePeerPrimaryKey) {
+  const {generator} = remoteUsers.get(remotePeerPrimaryKey);
+  const mediaStream = new MediaStream([generator]);
+  const existingVideoElement = document.getElementById(`video-${remotePeerPrimaryKey}`);
+  if (existingVideoElement) {
+    existingVideoElement.srcObject = mediaStream;
+  } else {
+    const remoteVideo = document.createElement('video');
+    remoteVideo.id = `video-${remotePeerPrimaryKey}`;
+    remoteVideo.classList.add('video-container');
+    remoteVideo.style.width = '100%';
+    remoteVideo.style.height = '100%';
+    remoteVideo.autoplay = true;
+
+    remoteVideo.srcObject = mediaStream;
+
+    const videoContainer = document.createElement('div');
+    videoContainer.classList.add('video-container');
+    videoContainer.id = `user-container-${remotePeerPrimaryKey}`;
+    videoContainer.appendChild(remoteVideo);
+    videoStreamsContainer.appendChild(videoContainer);
+  }
+}
+
+function removePeerVideo(key) {
   remoteUsers.delete(key); // Ensure the peer is removed from the map
   const idToRemove = `user-container-${key}`;
   const elementToRemove = document.getElementById(idToRemove);
@@ -342,17 +392,3 @@ function onPeerLeft(key) {
   }
 }
 
-// Function to close the transform stream
-async function closeTransformStream(transformer) {
-  if (transformer.readable.locked) {
-    const reader = transformer.readable.getReader();
-    await reader.cancel();
-    reader.releaseLock();
-  }
-
-  if (transformer.writable.locked) {
-    const writer = transformer.writable.getWriter();
-    await writer.close();
-    writer.releaseLock();
-  }
-}
