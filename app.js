@@ -41,7 +41,7 @@ swarm.on('connection', (socket, peerInfo) => {
         onPeerJoined(id)
         addPeerVideo(id)
       }
-    } else if ('codec' in bsonData) {
+    } else {
       await receiveChunksFromPeer(peersNoisePublicKey, chunk);
     }
   });
@@ -50,12 +50,20 @@ swarm.on('connection', (socket, peerInfo) => {
     onPeerLeft(peersNoisePublicKey);
   });
 
+  socket.once('error', (err) => {
+    console.log(err);
+  })
+
 });
 
 // When there's updates to the swarm, update the peers count
 swarm.on('update', () => {
   document.querySelector('#peers-count').textContent = swarm.connections.size;
 });
+
+// swarm.on('error', () => {
+//   console.error('Error writing swarm:', swarm);
+// })
 
 document.querySelector('#create-chat-room').addEventListener('click', createChatRoom);
 document.querySelector('#join-form').addEventListener('submit', joinChatRoom);
@@ -79,7 +87,8 @@ async function leaveSwarm(topicBuffer) {
   }
   document.querySelector('#setup').classList.remove('hidden');
   document.querySelector('#loading').classList.remove('hidden');
-  await Promise.all([...swarm.connections].map(conn => conn.end()))
+
+  await Promise.all([...swarm.connections].map(socket => socket.end()))
   if (topicBuffer) await swarm.leave(topicBuffer)
   await swarm.destroy()
   document.querySelector('#chat-room-topic').innerText = '';
