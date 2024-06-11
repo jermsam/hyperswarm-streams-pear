@@ -61,10 +61,6 @@ swarm.on('update', () => {
   document.querySelector('#peers-count').textContent = swarm.connections.size;
 });
 
-// swarm.on('error', () => {
-//   console.error('Error writing swarm:', swarm);
-// })
-
 document.querySelector('#create-chat-room').addEventListener('click', createChatRoom);
 document.querySelector('#join-form').addEventListener('submit', joinChatRoom);
 
@@ -77,9 +73,7 @@ async function joinSwarm(topicBuffer) {
   document.querySelector('#chat').classList.remove('hidden');
 }
 
-
 async function leaveSwarm(topicBuffer) {
-
   // Stop local stream if camera is on
   if (cameraOn) {
     await stopLocalStream();
