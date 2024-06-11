@@ -63,6 +63,7 @@ swarm.on('update', () => {
 
 document.querySelector('#create-chat-room').addEventListener('click', createChatRoom);
 document.querySelector('#join-form').addEventListener('submit', joinChatRoom);
+const topicStr = document.querySelector('#join-chat-room-topic').value;
 
 async function joinSwarm(topicBuffer) {
   document.querySelector('#setup').classList.add('hidden');
@@ -79,12 +80,11 @@ async function leaveSwarm(topicBuffer) {
     await stopLocalStream();
     cameraOn = false;
   }
-  document.querySelector('#setup').classList.remove('hidden');
-  document.querySelector('#loading').classList.remove('hidden');
-
   await Promise.all([...swarm.connections].map(socket => socket.end()))
   if (topicBuffer) await swarm.leave(topicBuffer)
   await swarm.destroy()
+  document.querySelector('#setup').classList.remove('hidden');
+  document.querySelector('#loading').classList.remove('hidden');
   document.querySelector('#chat-room-topic').innerText = '';
   document.querySelector('#loading').classList.add('hidden');
   document.querySelector('#chat').classList.add('hidden');
@@ -93,26 +93,28 @@ async function leaveSwarm(topicBuffer) {
 async function createChatRoom() {
   const chanelKeyByte = crypto.randomBytes(32);
   await joinSwarm(chanelKeyByte);
+  document.querySelector('#leave-btn').innerHTML='Leave'
 }
 
 async function joinChatRoom(e) {
   e.preventDefault();
-  const topicStr = document.querySelector('#join-chat-room-topic').value;
   const topicBuffer = b4a.from(topicStr, 'hex');
   await joinSwarm(topicBuffer);
+  document.querySelector('#leave-btn').innerHTML='Leave'
 }
 
 async function leaveChatRoom(e) {
   e?.preventDefault();
   const topicStr = document.querySelector('#join-chat-room-topic').value;
   const topicBuffer = b4a.from(topicStr, 'hex');
-  console.log({topicBuffer});
+  document.querySelector('#leave-btn').innerHTML='Leaving ...'
   await leaveSwarm(topicBuffer);
 }
 
 document.querySelector('#leave-btn').addEventListener('click', leaveChatRoom);
 
 const cameraButton = document.getElementById('camera-btn');
+const copyLinkButton = document.getElementById('copy-link');
 const videoStreamsContainer = document.getElementById('video-streams');
 
 function addLocalVideo(stream) {
@@ -274,13 +276,33 @@ async function stopLocalStream() {
   }
 }
 
+copyLinkButton.addEventListener('click', async (e) => {
+  await navigator.clipboard.writeText(topicStr);
+  const snackBar = document.getElementById("snackbar");
+  // Add the "show" class to DIV
+  snackBar.className = "show";
+
+  // After 3 seconds, remove the show class from DIV
+  setTimeout(function(){ snackBar.className = snackBar.className.replace("show", ""); }, 3000);
+})
+
 cameraButton.addEventListener('click', async () => {
   if (cameraOn) {
     await stopLocalStream();
-    cameraButton.innerHTML = 'Camera On';
+    cameraButton.innerHTML = `
+<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24">
+<path fill="currentColor" d="M18 7c0-1.103-.897-2-2-2H4c-1.103 0-2 .897-2 2v10c0 1.103.897 2 2 2h12c1.103 0 2-.897 2-2v-3.333L22 17V7l-4 3.333zm-1.998 10H4V7h12l.001 4.999L16 12l.001.001z"/>
+</svg>
+On
+`;
   } else {
     await startLocalStream();
-    cameraButton.innerHTML = 'Camera Off';
+    cameraButton.innerHTML = `
+<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24">
+<path fill="currentColor" d="M18 7c0-1.103-.897-2-2-2H6.414L3.707 2.293L2.293 3.707l18 18l1.414-1.414L18 16.586v-2.919L22 17V7l-4 3.333zm-2 7.586L8.414 7H16zM4 19h10.879l-2-2H4V8.121L2.145 6.265A1.977 1.977 0 0 0 2 7v10c0 1.103.897 2 2 2"/>
+</svg>
+ Off
+`;
   }
 });
 

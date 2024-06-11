@@ -32,7 +32,17 @@
         cursor: pointer;
     }
 
+    .copy-link-btn {
+        display: flex;
+        transition: all 150ms ease-out;
+      /*  background-color: v-bind(copyBtnBgColor);
+        color: v-bind(copyBtnTxtColor);*/
 
+        &:hover {
+          /*  background-color: var(--q-primary);*/
+            color: white;
+        }
+    }
 
     .hidden {
         display: none !important;
@@ -110,6 +120,7 @@
 <body>
 <pear-ctrl></pear-ctrl>
   <main>
+    <div id="snackbar">Topic copied..</div>
     <div id="setup">
       <div>
         <button id="create-chat-room">Create Room</button>
@@ -126,8 +137,10 @@
     <div id="chat" class="hidden">
       <div id="header">
         <div id="details">
-          <div>
-            Topic: <span id="chat-room-topic"></span>
+          <div style="display: flex; align-items: center; ">
+            <div>
+              Topic: <span id="chat-room-topic"></span>
+            </div>
           </div>
           <div>
             Peers: <span id="peers-count">0</span>
@@ -137,13 +150,25 @@
       <div id="stream-wrapper" >
         <div id="stream-controls">
           <div style="display: flex; justify-content: space-between;">
-            <div>
-              <button id="mic-btn">Mic On</button>
-              <button id="camera-btn">
-                Camera On
+            <div style="display: flex;">
+              <button id="camera-btn" style="display: flex; align-items: center;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24">
+                  <path fill="currentColor" d="M18 7c0-1.103-.897-2-2-2H4c-1.103 0-2 .897-2 2v10c0 1.103.897 2 2 2h12c1.103 0 2-.897 2-2v-3.333L22 17V7l-4 3.333zm-1.998 10H4V7h12l.001 4.999L16 12l.001.001z"/>
+                </svg>
+                On
+              </button>
+              <button
+                  class="copy-link-btn"
+                  style="cursor: pointer;"
+                  id="copy-link"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24">
+                  <path fill="currentColor" d="M19 21H8V7h11m0-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2m-3-4H4a2 2 0 0 0-2 2v14h2V3h12z"/>
+                </svg>
+                Copy Topic
               </button>
             </div>
-            <button id="leave-btn">Leave Stream</button>
+            <button id="leave-btn">Leave</button>
           </div>
         </div>
         <div id="video-streams"></div>
