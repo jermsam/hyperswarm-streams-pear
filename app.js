@@ -63,7 +63,7 @@ swarm.on('update', () => {
 
 document.querySelector('#create-chat-room').addEventListener('click', createChatRoom);
 document.querySelector('#join-form').addEventListener('submit', joinChatRoom);
-const topicStr = document.querySelector('#join-chat-room-topic').value;
+
 
 async function joinSwarm(topicBuffer) {
   document.querySelector('#setup').classList.add('hidden');
@@ -98,15 +98,18 @@ async function createChatRoom() {
 
 async function joinChatRoom(e) {
   e.preventDefault();
+  const topicStr = document.querySelector('#join-chat-room-topic').value;
   const topicBuffer = b4a.from(topicStr, 'hex');
   await joinSwarm(topicBuffer);
   document.querySelector('#leave-btn').innerHTML='Leave'
 }
 
+
+
 async function leaveChatRoom(e) {
   e?.preventDefault();
-  const topicStr = document.querySelector('#join-chat-room-topic').value;
-  const topicBuffer = b4a.from(topicStr, 'hex');
+
+  const topicBuffer = b4a.from(document.querySelector('#chat-room-topic').innerHTML, 'hex');
   document.querySelector('#leave-btn').innerHTML='Leaving ...'
   await leaveSwarm(topicBuffer);
 }
@@ -277,8 +280,13 @@ async function stopLocalStream() {
 }
 
 copyLinkButton.addEventListener('click', async (e) => {
-  await navigator.clipboard.writeText(topicStr);
   const snackBar = document.getElementById("snackbar");
+
+  if (document.hasFocus()) {
+    await navigator.clipboard.writeText(document.querySelector('#chat-room-topic').innerHTML);
+  } else {
+    // Handle the case where document is not focused (e.g., prompt for focus)
+  }
   // Add the "show" class to DIV
   snackBar.className = "show";
 
