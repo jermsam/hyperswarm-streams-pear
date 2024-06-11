@@ -41,7 +41,7 @@ swarm.on('connection', (socket, peerInfo) => {
         onPeerJoined(id)
         addPeerVideo(id)
       }
-    } else {
+    } else if ('codec' in bsonData) {
       await receiveChunksFromPeer(peersNoisePublicKey, chunk);
     }
   });
@@ -71,15 +71,17 @@ async function joinSwarm(topicBuffer) {
 
 
 async function leaveSwarm(topicBuffer) {
+
   // Stop local stream if camera is on
   if (cameraOn) {
     await stopLocalStream();
     cameraOn = false;
   }
-
   document.querySelector('#setup').classList.remove('hidden');
   document.querySelector('#loading').classList.remove('hidden');
-  await swarm.leave(topicBuffer);
+  await Promise.all([...swarm.connections].map(conn => conn.end()))
+  if (topicBuffer) await swarm.leave(topicBuffer)
+  await swarm.destroy()
   document.querySelector('#chat-room-topic').innerText = '';
   document.querySelector('#loading').classList.add('hidden');
   document.querySelector('#chat').classList.add('hidden');
@@ -349,7 +351,7 @@ function onPeerLeft(remotePeerPrimaryKey) {
     // Properly close the streams and clean up
     writer.close().catch((error) => console.error('Error closing writer stream:', error));
 
-    if(!transformer.locked) {
+    if(!transformer.readable.locked) {
       // Properly close the streams and clean up
       transformer.readable.cancel().catch((error) => console.error('Error canceling readable stream:', error));
     }
